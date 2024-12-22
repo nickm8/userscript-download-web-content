@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         JSON Response Capture
 // @namespace    http://tampermonkey.net/
-// @version      0.1
-// @description  Capture and save JSON responses from web requests
+// @version      1.1
+// @description  Capture and save JSON responses from web requests with URL filtering
 // @author       N
 // @match        *://*/*
 // @grant        none
@@ -13,9 +13,10 @@
 (function() {
     'use strict';
 
-    // First, inject required styles
+    // Additional styles for configuration UI
     const style = document.createElement('style');
     style.textContent = `
+        /* Previous styles remain the same */
         .json-capture-panel {
             position: fixed;
             bottom: 1rem;
@@ -74,7 +75,7 @@
             max-height: 12rem;
         }
         .json-capture-button {
-            padding: 0;
+            padding: 0.25rem 0.5rem;
             background: none;
             border: none;
             cursor: pointer;
@@ -86,15 +87,174 @@
         .json-capture-button.delete:hover {
             color: #dc2626;
         }
+        
+        /* New styles for configuration */
+        .config-section {
+            margin-bottom: 1rem;
+            padding: 0.5rem;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.375rem;
+        }
+        .config-title {
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+        .config-input {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .config-input input {
+            flex: 1;
+            padding: 0.25rem 0.5rem;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.25rem;
+        }
+        .config-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.25rem;
+        }
+        .config-tag {
+            background: #f3f4f6;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        .config-tag button {
+            padding: 0;
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: #6b7280;
+        }
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid #e5e7eb;
+            margin-bottom: 1rem;
+        }
+        .tab {
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+        }
+        .tab.active {
+            border-bottom-color: #2563eb;
+            color: #2563eb;
+        }
     `;
     document.head.appendChild(style);
 
-    // Create the React component
     const { useState, useEffect } = React;
+
+    // Configuration component
+    function ConfigSection({ matches, ignores, onUpdateMatches, onUpdateIgnores }) {
+        const [newMatch, setNewMatch] = useState('');
+        const [newIgnore, setNewIgnore] = useState('');
+
+        const addMatch = () => {
+            if (newMatch && !matches.includes(newMatch)) {
+                onUpdateMatches([...matches, newMatch]);
+                setNewMatch('');
+            }
+        };
+
+        const addIgnore = () => {
+            if (newIgnore && !ignores.includes(newIgnore)) {
+                onUpdateIgnores([...ignores, newIgnore]);
+                setNewIgnore('');
+            }
+        };
+
+        const removeMatch = (match) => {
+            onUpdateMatches(matches.filter(m => m !== match));
+        };
+
+        const removeIgnore = (ignore) => {
+            onUpdateIgnores(ignores.filter(i => i !== ignore));
+        };
+
+        return React.createElement('div', { className: 'config-content' }, [
+            React.createElement('div', { key: 'matches', className: 'config-section' }, [
+                React.createElement('div', { className: 'config-title' }, 'URL Matches'),
+                React.createElement('div', { className: 'config-input' }, [
+                    React.createElement('input', {
+                        value: newMatch,
+                        onChange: (e) => setNewMatch(e.target.value),
+                        placeholder: 'Enter URL keyword to match',
+                        onKeyPress: (e) => e.key === 'Enter' && addMatch()
+                    }),
+                    React.createElement('button', {
+                        className: 'json-capture-button',
+                        onClick: addMatch
+                    }, '+')
+                ]),
+                React.createElement('div', { className: 'config-list' },
+                    matches.map(match => 
+                        React.createElement('span', { key: match, className: 'config-tag' }, [
+                            match,
+                            React.createElement('button', {
+                                onClick: () => removeMatch(match)
+                            }, '×')
+                        ])
+                    )
+                )
+            ]),
+            React.createElement('div', { key: 'ignores', className: 'config-section' }, [
+                React.createElement('div', { className: 'config-title' }, 'URL Ignores'),
+                React.createElement('div', { className: 'config-input' }, [
+                    React.createElement('input', {
+                        value: newIgnore,
+                        onChange: (e) => setNewIgnore(e.target.value),
+                        placeholder: 'Enter URL keyword to ignore',
+                        onKeyPress: (e) => e.key === 'Enter' && addIgnore()
+                    }),
+                    React.createElement('button', {
+                        className: 'json-capture-button',
+                        onClick: addIgnore
+                    }, '+')
+                ]),
+                React.createElement('div', { className: 'config-list' },
+                    ignores.map(ignore => 
+                        React.createElement('span', { key: ignore, className: 'config-tag' }, [
+                            ignore,
+                            React.createElement('button', {
+                                onClick: () => removeIgnore(ignore)
+                            }, '×')
+                        ])
+                    )
+                )
+            ])
+        ]);
+    }
 
     function JsonCapturePanel() {
         const [captures, setCaptures] = useState([]);
         const [isMinimized, setIsMinimized] = useState(false);
+        const [activeTab, setActiveTab] = useState('captures');
+        const [matches, setMatches] = useState([]);
+        const [ignores, setIgnores] = useState([]);
+        const domain = window.location.hostname;
+
+        // Load configuration from localStorage
+        useEffect(() => {
+            const config = JSON.parse(localStorage.getItem(`jsonCapture_${domain}`) || '{"matches":[],"ignores":[]}');
+            setMatches(config.matches);
+            setIgnores(config.ignores);
+        }, []);
+
+        // Save configuration to localStorage
+        useEffect(() => {
+            localStorage.setItem(`jsonCapture_${domain}`, JSON.stringify({ matches, ignores }));
+        }, [matches, ignores]);
+
+        const shouldCaptureUrl = (url) => {
+            if (matches.length === 0) return false;
+            return matches.some(match => url.includes(match)) && 
+                   !ignores.some(ignore => url.includes(ignore));
+        };
 
         useEffect(() => {
             // Intercept fetch
@@ -107,12 +267,14 @@
                     const contentType = clone.headers.get('content-type');
                     if (contentType && contentType.includes('application/json')) {
                         const url = typeof args[0] === 'string' ? args[0] : args[0].url;
-                        const json = await clone.json();
-                        setCaptures(prev => [...prev, {
-                            timestamp: new Date().toISOString(),
-                            url,
-                            data: json
-                        }]);
+                        if (shouldCaptureUrl(url)) {
+                            const json = await clone.json();
+                            setCaptures(prev => [...prev, {
+                                timestamp: new Date().toISOString(),
+                                url,
+                                data: json
+                            }]);
+                        }
                     }
                 } catch (err) {
                     console.error('Error processing response:', err);
@@ -135,12 +297,14 @@
                     try {
                         const contentType = this.getResponseHeader('content-type');
                         if (contentType && contentType.includes('application/json')) {
-                            const json = JSON.parse(this.responseText);
-                            setCaptures(prev => [...prev, {
-                                timestamp: new Date().toISOString(),
-                                url: this._url,
-                                data: json
-                            }]);
+                            if (shouldCaptureUrl(this._url)) {
+                                const json = JSON.parse(this.responseText);
+                                setCaptures(prev => [...prev, {
+                                    timestamp: new Date().toISOString(),
+                                    url: this._url,
+                                    data: json
+                                }]);
+                            }
                         }
                     } catch (err) {
                         console.error('Error processing XHR response:', err);
@@ -149,14 +313,14 @@
 
                 return originalXHRSend.apply(this, args);
             };
-        }, []);
+        }, [matches, ignores]);
 
         const handleSave = () => {
             const blob = new Blob([JSON.stringify(captures, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `json-captures-${new Date().toISOString()}.json`;
+            a.download = `json-captures-${domain}-${new Date().toISOString()}.json`;
             a.click();
             URL.revokeObjectURL(url);
         };
@@ -201,39 +365,60 @@
                 ])
             ]),
             // Content
-            !isMinimized && React.createElement('div', {
-                key: 'content',
-                className: 'json-capture-content'
-            },
-                captures.length === 0
-                    ? React.createElement('div', {
-                        style: { textAlign: 'center', color: '#6b7280' }
-                    }, 'No JSON responses captured yet')
-                    : captures.map((capture, index) =>
-                        React.createElement('div', {
-                            key: index,
-                            className: 'json-capture-item'
-                        }, [
-                            React.createElement('div', {
-                                key: 'url',
-                                className: 'json-capture-url'
-                            }, capture.url),
-                            React.createElement('div', {
-                                key: 'timestamp',
-                                className: 'json-capture-timestamp'
-                            }, capture.timestamp),
-                            React.createElement('pre', {
-                                key: 'json',
-                                className: 'json-capture-json'
-                            }, JSON.stringify(capture.data, null, 2))
-                        ])
+            !isMinimized && React.createElement('div', { key: 'content' }, [
+                // Tabs
+                React.createElement('div', { key: 'tabs', className: 'tabs' }, [
+                    React.createElement('div', {
+                        className: `tab ${activeTab === 'captures' ? 'active' : ''}`,
+                        onClick: () => setActiveTab('captures')
+                    }, 'Captures'),
+                    React.createElement('div', {
+                        className: `tab ${activeTab === 'config' ? 'active' : ''}`,
+                        onClick: () => setActiveTab('config')
+                    }, 'Configuration')
+                ]),
+                // Tab content
+                activeTab === 'captures' ? 
+                    React.createElement('div', {
+                        key: 'captures',
+                        className: 'json-capture-content'
+                    },
+                        captures.length === 0
+                            ? React.createElement('div', {
+                                style: { textAlign: 'center', color: '#6b7280' }
+                            }, matches.length === 0 ? 'Configure URL matches to start capturing' : 'No JSON responses captured yet')
+                            : captures.map((capture, index) =>
+                                React.createElement('div', {
+                                    key: index,
+                                    className: 'json-capture-item'
+                                }, [
+                                    React.createElement('div', {
+                                        key: 'url',
+                                        className: 'json-capture-url'
+                                    }, capture.url),
+                                    React.createElement('div', {
+                                        key: 'timestamp',
+                                        className: 'json-capture-timestamp'
+                                    }, capture.timestamp),
+                                    React.createElement('pre', {
+                                        key: 'json',
+                                        className: 'json-capture-json'
+                                    }, JSON.stringify(capture.data, null, 2))
+                                ])
+                            )
                     )
-            )
-        ]);
-    }
+                    : React.createElement(ConfigSection, {
+                        key: 'config',
+                        matches,
+                        ignores,
+                        onUpdateMatches: setMatches,
+                        onUpdateIgnores: setIgnores
+                    })
+            ])
+]);
+}
 
-    // Create container and render React component
-    const container = document.createElement('div');
-    document.body.appendChild(container);
-    ReactDOM.render(React.createElement(JsonCapturePanel), container);
+const container = document.createElement('div');
+document.body.appendChild(container);
+ReactDOM.render(React.createElement(JsonCapturePanel), container);
 })();
