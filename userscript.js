@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         JSON Response Capture
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @description  Capture and save JSON responses from web requests with URL filtering
 // @author       N
 // @match        *://*/*
@@ -232,7 +232,7 @@
 
     function JsonCapturePanel() {
         const [captures, setCaptures] = useState([]);
-        const [isMinimized, setIsMinimized] = useState(false);
+        const [isMinimized, setIsMinimized] = useState(true);
         const [activeTab, setActiveTab] = useState('captures');
         const [matches, setMatches] = useState([]);
         const [ignores, setIgnores] = useState([]);
