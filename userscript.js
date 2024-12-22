@@ -3,7 +3,8 @@
 // @namespace    http://tampermonkey.net/
 // @version      1.2
 // @description  Capture and save JSON responses from web requests with URL filtering
-// @author       N
+// @author       nickm8
+// @license      MIT
 // @match        *://*/*
 // @grant        none
 // @require      https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js
